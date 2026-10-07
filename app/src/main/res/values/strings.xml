@@ -1,0 +1,29 @@
+<resources>
+    <string name="app_name">IoT Motion Guard</string>
+    <string name="title_login">Iniciar Sesión</string>
+    <string name="title_register">Registro de Usuario</string>
+    <string name="label_email">Correo Electrónico</string>
+    <string name="label_password">Contraseña</string>
+    <string name="label_confirm_password">Confirmar Contraseña</string>
+    <string name="btn_login">Ingresar</string>
+    <string name="btn_register">Registrarse</string>
+    <string name="prompt_register">¿No tienes cuenta? Regístrate aquí</string>
+    <string name="prompt_login">¿Ya tienes cuenta? Inicia sesión</string>
+    <string name="app_subtitle">Monitoreo e Interconexión de Sensores IoT</string>
+    <string name="title_dashboard">Panel de Control IoT</string>
+    <string name="system_armed">SISTEMA ARMADO</string>
+    <string name="system_disarmed">SISTEMA DESARMADO</string>
+    <string name="btn_simulate_motion">Simular Movimiento</string>
+    <string name="sensor_status_normal">Estado: Normal (Sin movimiento)</string>
+    <string name="sensor_status_motion">¡ALERTA: MOVIMIENTO DETECTADO!</string>
+    <string name="section_sensors">Sensores de Movimiento en Tiempo Real</string>
+    <string name="section_history">Historial de Eventos de Movimiento</string>
+    <string name="btn_logout">Cerrar Sesión</string>
+    <string name="btn_clear_history">Limpiar Historial</string>
+    <string name="sensor1_name">Sensor 1: Entrada Principal</string>
+    <string name="sensor2_name">Sensor 2: Pasillo Norte</string>
+    <string name="sensor3_name">Sensor 3: Almacén / Patio</string>
+    <string name="no_last_detection">Última detección: Ninguna</string>
+    <string name="empty_history">No hay eventos de movimiento registrados aún</string>
+    <string name="wifi_connected">📶 Wi-Fi: Conectado</string>
+</resources>

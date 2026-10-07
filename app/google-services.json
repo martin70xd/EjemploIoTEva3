@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "565799392946",
+    "project_id": "ejemploiot-9f420",
+    "storage_bucket": "ejemploiot-9f420.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:565799392946:android:b79564053a9343be405bab",
+        "android_client_info": {
+          "package_name": "com.example.ejemploiot"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBL8_0pgA_OPod6zPaXL_EMedFSGoqIvs0"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
