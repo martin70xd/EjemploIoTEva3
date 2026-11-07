@@ -22,6 +22,10 @@ class MotionEventAdapter(
         notifyDataSetChanged()
     }
 
+    fun getEvents(): List<MotionEventModel> {
+        return eventsList
+    }
+
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): EventViewHolder {
         val view = LayoutInflater.from(parent.context)
             .inflate(R.layout.item_motion_event, parent, false)

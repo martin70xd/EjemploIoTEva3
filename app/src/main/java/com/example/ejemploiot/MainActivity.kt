@@ -1,9 +1,16 @@
 package com.example.ejemploiot
 
+import android.content.Context
 import android.content.Intent
+import android.media.MediaPlayer
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import android.view.View
 import android.widget.TextView
 import android.widget.Toast
@@ -15,6 +22,8 @@ import androidx.recyclerview.widget.RecyclerView
 import com.android.volley.Response
 import com.android.volley.toolbox.StringRequest
 import com.android.volley.toolbox.Volley
+import com.example.ejemploiot.database.DatabaseHelper
+import com.example.ejemploiot.utils.SecurityHelper
 import com.example.ejemploiot.adapter.MotionEventAdapter
 import com.example.ejemploiot.model.MotionEventModel
 import com.example.ejemploiot.model.SensorModel
@@ -36,10 +45,16 @@ class MainActivity : AppCompatActivity() {
     private lateinit var auth: FirebaseAuth
     private lateinit var dbRef: DatabaseReference
     private lateinit var eventAdapter: MotionEventAdapter
+    private lateinit var dbHelper: DatabaseHelper
 
     private var isSystemArmed: Boolean = true
     private val handler = Handler(Looper.getMainLooper())
     private val dateFormat = SimpleDateFormat("dd/MM/yyyy HH:mm:ss", Locale.getDefault())
+    
+    // Variable para el reproductor de sonido
+    private var mediaPlayer: MediaPlayer? = null
+    private lateinit var connectivityManager: ConnectivityManager
+    private lateinit var networkCallback: ConnectivityManager.NetworkCallback
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -55,6 +70,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         dbRef = FirebaseDatabase.getInstance().reference
+        dbHelper = DatabaseHelper(this)
 
         // UI Views
         val tvUserEmail = findViewById<TextView>(R.id.tvUserEmail)
@@ -107,12 +123,31 @@ class MainActivity : AppCompatActivity() {
             simulateMotion("sensor3", "Sensor 3", "Almacén / Patio")
         }
 
-        // Clear History
+        // Limpiar Historial en la nube y local
         btnClearHistory.setOnClickListener {
             dbRef.child("events").removeValue().addOnSuccessListener {
-                Toast.makeText(this, "Historial de eventos limpiado", Toast.LENGTH_SHORT).show()
+                dbHelper.clearOfflineEvents()
+                Toast.makeText(this, "Historial limpiado", Toast.LENGTH_SHORT).show()
             }
         }
+
+        // Listener de Reconexión Automática (Internet Vuelve)
+        setupNetworkListener()
+    }
+
+    private fun setupNetworkListener() {
+        connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val builder = NetworkRequest.Builder()
+
+        networkCallback = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) {
+                // Cuando vuelve el internet, intentar sincronizar en el hilo principal
+                handler.post {
+                    syncOfflineData()
+                }
+            }
+        }
+        connectivityManager.registerNetworkCallback(builder.build(), networkCallback)
     }
 
     private fun setupSystemStatusSync(
@@ -123,7 +158,9 @@ class MainActivity : AppCompatActivity() {
 
         statusRef.addValueEventListener(object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
-                isSystemArmed = snapshot.getValue(Boolean::class.java) ?: true
+                val statusString = snapshot.getValue(String::class.java) ?: "true"
+                isSystemArmed = (statusString == "true")
+                
                 switchState.isChecked = isSystemArmed
 
                 if (isSystemArmed) {
@@ -141,7 +178,7 @@ class MainActivity : AppCompatActivity() {
         })
 
         switchState.setOnCheckedChangeListener { _, isChecked ->
-            statusRef.setValue(isChecked)
+            statusRef.setValue(isChecked.toString())
         }
     }
 
@@ -172,22 +209,80 @@ class MainActivity : AppCompatActivity() {
         val tvLastTime = findViewById<TextView>(lastTimeTvId)
 
         val hasMotion = sensorSnap.child("hasMotion").getValue(Boolean::class.java) ?: false
-        val lastTimestamp = sensorSnap.child("lastMotionTimestamp").getValue(Long::class.java) ?: 0L
+        val sensorId = sensorSnap.child("id").getValue(String::class.java) ?: "unknown"
+        val sensorName = sensorSnap.child("name").getValue(String::class.java) ?: "Sensor Desconocido"
+        val location = sensorSnap.child("location").getValue(String::class.java) ?: "Ubicación Desconocida"
 
         if (hasMotion && isSystemArmed) {
+            // Reproducir sonido de alarma si existe el archivo
+            reproducirAlarma()
+
+            // El ESP32 solo cambia hasMotion a true.
+            // Es la App de Android quien le asigna la FECHA y HORA REAL y la sube al historial.
+            val currentTime = System.currentTimeMillis()
+            
+            // Verificamos si acabamos de registrar este evento para no duplicarlo infinitamente
+            val lastRecordedTime = sensorSnap.child("lastMotionTimestamp").getValue(Long::class.java) ?: 0L
+            if (currentTime - lastRecordedTime > 3000) { 
+                // Actualizar la fecha real en el sensor
+                dbRef.child("sensors").child(sensorId).child("lastMotionTimestamp").setValue(currentTime)
+                
+                // Guardar en MySQL
+                guardarEnMySQL(sensorName, location, "Dispositivo Físico (ESP32)")
+
+                // Guardar en el Historial de Eventos de Firebase
+                val eventRef = dbRef.child("events").push()
+                val motionEvent = MotionEventModel(
+                    id = eventRef.key ?: currentTime.toString(),
+                    sensorId = sensorId,
+                    sensorName = sensorName,
+                    location = location,
+                    timestamp = currentTime,
+                    userEmail = "Hardware Wokwi"
+                )
+                eventRef.setValue(motionEvent)
+
+                // Apagar la alerta del ESP32 después de 4 segundos
+                handler.postDelayed({
+                    dbRef.child("sensors").child(sensorId).child("hasMotion").setValue(false)
+                }, 4000)
+            }
+
             card.setCardBackgroundColor(ContextCompat.getColor(this, R.color.motion_alert_bg))
             tvStatus.text = getString(R.string.sensor_status_motion)
             tvStatus.setTextColor(ContextCompat.getColor(this, R.color.accent_red))
+            
+            tvLastTime.text = "Última detección: ${dateFormat.format(Date(currentTime))}"
         } else {
             card.setCardBackgroundColor(ContextCompat.getColor(this, R.color.card_bg))
             tvStatus.text = getString(R.string.sensor_status_normal)
             tvStatus.setTextColor(ContextCompat.getColor(this, R.color.accent_green))
+            
+            val lastTimestamp = sensorSnap.child("lastMotionTimestamp").getValue(Long::class.java) ?: 0L
+            if (lastTimestamp > 0) {
+                tvLastTime.text = "Última detección: ${dateFormat.format(Date(lastTimestamp))}"
+            } else {
+                tvLastTime.text = getString(R.string.no_last_detection)
+            }
         }
+    }
 
-        if (lastTimestamp > 0) {
-            tvLastTime.text = "Última detección: ${dateFormat.format(Date(lastTimestamp))}"
-        } else {
-            tvLastTime.text = getString(R.string.no_last_detection)
+    private fun reproducirAlarma() {
+        try {
+            // Detener si ya estaba sonando
+            if (mediaPlayer?.isPlaying == true) {
+                mediaPlayer?.stop()
+                mediaPlayer?.release()
+            }
+            // Iniciar el MP3 (requiere que el archivo se llame "alert.mp3" y esté en res/raw/)
+            // Si el archivo no existe aún, Android Studio lo marcará en rojo, no te preocupes.
+            val resId = resources.getIdentifier("alert", "raw", packageName)
+            if (resId != 0) {
+                mediaPlayer = MediaPlayer.create(this, resId)
+                mediaPlayer?.start()
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
     }
 
@@ -196,6 +291,9 @@ class MainActivity : AppCompatActivity() {
 
         eventsRef.addValueEventListener(object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
+                // Sincronizar los locales pendientes a Firebase
+                syncOfflineData()
+
                 val eventList = mutableListOf<MotionEventModel>()
                 for (child in snapshot.children) {
                     val event = child.getValue(MotionEventModel::class.java)
@@ -203,6 +301,10 @@ class MainActivity : AppCompatActivity() {
                         eventList.add(event)
                     }
                 }
+
+                // Sumar los que siguen offline a la vista temporalmente
+                val offlineEvents = dbHelper.getOfflineEvents()
+                eventList.addAll(offlineEvents)
 
                 // Show newest events at the top
                 eventList.sortByDescending { it.timestamp }
@@ -220,6 +322,28 @@ class MainActivity : AppCompatActivity() {
                 // Handle read cancel
             }
         })
+    }
+
+    private fun syncOfflineData() {
+        val offlineEvents = dbHelper.getOfflineEvents()
+        if (offlineEvents.isNotEmpty()) {
+            val eventsRef = dbRef.child("events")
+            for (event in offlineEvents) {
+                val newRef = eventsRef.push()
+                val eventToSync = event.copy(id = newRef.key ?: System.currentTimeMillis().toString())
+                newRef.setValue(eventToSync)
+                
+                // Enviar a MySQL de manera independiente
+                guardarEnMySQL(event.sensorName, event.location, "Offline: ${event.userEmail}")
+            }
+            dbHelper.clearOfflineEvents()
+            
+            // Refrescar lista local visualmente
+            val currentList = eventAdapter.getEvents()
+            eventAdapter.updateData(currentList)
+            
+            Toast.makeText(this, "Datos Offline Subidos (${offlineEvents.size})", Toast.LENGTH_LONG).show()
+        }
     }
 
     private fun simulateMotion(sensorId: String, sensorName: String, location: String) {
@@ -243,8 +367,12 @@ class MainActivity : AppCompatActivity() {
             userEmail = currentUserEmail
         )
 
-        eventRef.setValue(motionEvent).addOnFailureListener { e ->
-            Toast.makeText(this, "Error de escritura en Firebase: ${e.message}", Toast.LENGTH_LONG).show()
+        eventRef.setValue(motionEvent).addOnFailureListener { _ ->
+            // Si Firebase falla por falta de internet, guardamos localmente
+            val savedId = dbHelper.insertOfflineEvent(sensorName, location, timestamp)
+            if (savedId > -1) {
+                Toast.makeText(this, "Sin internet. Guardado Offline (ID: $savedId).", Toast.LENGTH_LONG).show()
+            }
         }
 
         // 2. Update Sensor state
@@ -274,9 +402,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun guardarEnMySQL(sensorName: String, location: String, userEmail: String) {
         // 10.0.2.2 es para el Emulador de Android Studio. 
-        // 10.76.34.166 es la IP local de esta PC para un celular físico en la misma red Wi-Fi
         val urlEmulador = "http://10.0.2.2/api_iot/registrar_evento.php"
-        val urlFisico = "http://10.76.34.166/api_iot/registrar_evento.php"
+        val urlFisico = "http://192.168.1.9/api_iot/registrar_evento.php"
 
         enviarPeticionMySQL(urlEmulador, sensorName, location, userEmail) { exito ->
             if (!exito) {
@@ -298,10 +425,11 @@ class MainActivity : AppCompatActivity() {
             val request = object : StringRequest(
                 Method.POST, url,
                 Response.Listener { _ ->
-                    Toast.makeText(this, "¡Evento guardado también en MySQL (XAMPP)!", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this, "MySQL: Evento guardado", Toast.LENGTH_SHORT).show()
                     onComplete(true)
                 },
-                Response.ErrorListener {
+                Response.ErrorListener { error ->
+                    Log.e("VOLLEY_ERROR", "Error MySQL: ${error.message}")
                     onComplete(false)
                 }
             ) {
@@ -324,5 +452,16 @@ class MainActivity : AppCompatActivity() {
         intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
         startActivity(intent)
         finish()
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        mediaPlayer?.release()
+        mediaPlayer = null
+        try {
+            connectivityManager.unregisterNetworkCallback(networkCallback)
+        } catch (e: Exception) {
+            // Ignorar
+        }
     }
 }

@@ -87,7 +87,7 @@ class RegisterActivity : AppCompatActivity() {
 
     private fun registrarUsuarioEnMySQL(email: String, pass: String) {
         val urlEmulador = "http://10.0.2.2/api_iot/register.php"
-        val urlFisico = "http://10.76.34.166/api_iot/register.php"
+        val urlFisico = "http://192.168.1.9/api_iot/register.php"
 
         enviarRegistroMySQL(urlEmulador, email, pass) { exito ->
             if (!exito) {
